@@ -2,10 +2,13 @@ import {Seed} from '@/models/Seed';
 import {ApolloSandbox} from '@apollo/sandbox/react';
 import {HandleRequest} from '@apollo/sandbox/src/helpers/postMessageRelayHelpers';
 import {zodResolver} from '@hookform/resolvers/zod';
-import {ChevronsUpDown, Plus, Settings, Trash, User} from 'lucide-react';
+import {ChevronsUpDown, LogOut, Plus, Settings, Trash} from 'lucide-react';
 import React, {useCallback, useEffect, useState} from 'react';
 import {useForm} from 'react-hook-form';
 import {useNavigate} from 'react-router';
+import Session, {
+  useSessionContext,
+} from 'supertokens-auth-react/recipe/session';
 import {z} from 'zod';
 import instant_mock_logo from '../../assets/instant_mock_logo.svg';
 import narrative from '../../assets/narrative.png';
@@ -22,6 +25,7 @@ import {
   AlertDialogHeader,
   AlertDialogTitle,
 } from './alert-dialog';
+import {Avatar, AvatarFallback, AvatarImage} from './avatar';
 import {Button} from './button';
 import {
   Card,
@@ -46,6 +50,12 @@ import {
   DialogHeader,
   DialogTitle,
 } from './dialog';
+import {
+  DropdownMenu,
+  DropdownMenuContent,
+  DropdownMenuItem,
+  DropdownMenuTrigger,
+} from './dropdown-menu';
 import {
   Form,
   FormControl,
@@ -82,7 +92,9 @@ import {Toaster} from './toaster';
 import {toast} from './use-toast';
 
 const Home = () => {
+  const sessionContext = useSessionContext();
   const navigate = useNavigate();
+
   const [selectedTab, setSelectedTab] = useState('sandbox');
   const [selectedGraph, setSelectedGraph] = useState(null);
   const [selectedVariant, setSelectedVariant] = useState(null);
@@ -101,12 +113,11 @@ const Home = () => {
   const [seedToView, setSeedToView] = useState(null);
   const [isSeedButtonVisible, setIsSeedButtonVisible] = useState(false);
   const [isCreateSeedView, setIsCreateSeedView] = useState(true);
-  const serverBaseUrl = getApiBaseUrl();
-
-  //TODO: refine names
   const [seedArgs, setSeedArgs] = useState('{}');
   const [seedResponse, setSeedResponse] = useState('');
   const [operationName, setOperationName] = useState('');
+  const [avatarUrl, setAvatarUrl] = useState<string | null>(null);
+  const serverBaseUrl = getApiBaseUrl();
 
   const handleSettingsClick = () => navigate('/settings');
 
@@ -115,6 +126,11 @@ const Home = () => {
     setSelectedTab('seeds');
     setIsSeedButtonVisible(false);
   };
+
+  async function handleSignOut() {
+    await Session.signOut();
+    navigate('/auth');
+  }
 
   useEffect(() => {
     const fetchSeedGroups = () => {
@@ -230,7 +246,14 @@ const Home = () => {
     async (endpointUrl, requestOptions) => {
       console.log('Fetching with custom fetcher');
 
-      const result = await fetch(endpointUrl, requestOptions);
+      const result = await fetch(endpointUrl, {
+        method: 'POST',
+        headers: {
+          'seed-group': requestOptions.headers['seed-group'],
+          'Content-Type': 'application/json',
+        },
+        body: requestOptions.body,
+      });
       const responseBody = await result.json();
       const requestBody = JSON.parse(requestOptions.body?.toString()!);
 
@@ -328,6 +351,40 @@ const Home = () => {
       operationMatchArguments: '{}',
     },
   });
+
+  useEffect(() => {
+    const fetchAvatar = async () => {
+      try {
+        console.log('fetching avatar');
+        const response = await fetch(`${serverBaseUrl}/api/avatar`, {
+          method: 'GET',
+          credentials: 'include', // Include cookies for session-based auth
+          headers: {
+            'Content-Type': 'application/json',
+          },
+        });
+
+        if (!response.ok) {
+          throw new Error(`Failed to fetch avatar: ${response.statusText}`);
+        }
+
+        const data = await response.json();
+        setAvatarUrl(data.avatarUrl);
+      } catch (err: any) {
+        console.error('Error fetching avatar:', err);
+      }
+    };
+
+    fetchAvatar();
+  }, []);
+
+  useEffect(() => {
+    console.log('Session Context:', JSON.stringify(sessionContext, null, 2));
+  }, [sessionContext]);
+
+  if (sessionContext.loading) {
+    return null;
+  }
 
   const {setValue} = form;
 
@@ -469,6 +526,10 @@ const Home = () => {
     setIsDeleteDialogOpen(true);
   };
 
+  if (sessionContext.loading === true) {
+    return null;
+  }
+
   return (
     <Tabs value={selectedTab} onValueChange={setSelectedTab} className="w-full">
       <Toaster />
@@ -512,7 +573,20 @@ const Home = () => {
               className="h-5 w-5 text-gray-500 cursor-pointer"
               onClick={handleSettingsClick}
             />
-            <User className="h-5 w-5 text-gray-500" />
+            <DropdownMenu>
+              <DropdownMenuTrigger asChild>
+                <Avatar className="cursor-pointer">
+                  <AvatarImage src={avatarUrl} />
+                  <AvatarFallback>?</AvatarFallback>
+                </Avatar>
+              </DropdownMenuTrigger>
+              <DropdownMenuContent align="end" className="w-56">
+                <DropdownMenuItem onSelect={handleSignOut}>
+                  <LogOut className="mr-2 h-4 w-4" />
+                  <span>Sign out</span>
+                </DropdownMenuItem>
+              </DropdownMenuContent>
+            </DropdownMenu>
           </div>
         </div>
         <div className="flex items-center gap-4 px-4 py-2 bg-white border-t">

@@ -9,14 +9,18 @@ import {
 import cors from 'cors';
 import express from 'express';
 import path from 'path';
+import supertokens from 'supertokens-node';
 import swaggerJsdoc from 'swagger-jsdoc';
 import swaggerUi from 'swagger-ui-express';
 import * as Undici from 'undici';
+import {getWebsiteDomain, SuperTokensConfig} from './config/supertokens';
 import Client from './graphql/client';
+import {authMiddleware} from './middleware/auth';
 import {ApolloApiKey} from './models/apolloApiKey';
 import {Seed} from './models/seed';
 import {SeedGroup} from './models/seedGroup';
 import apolloApiKeysRoutes from './routes/apolloApiKey';
+import avatarRoutes from './routes/avatar';
 import graphqlRoutes from './routes/graphql';
 import graphsRoutes from './routes/graphs';
 import proposalsRoutes from './routes/proposals';
@@ -53,6 +57,12 @@ export const DI = {} as {
 };
 
 const initializeApp = async () => {
+  logger.startup('Initializing SuperTokens with config', {
+    apiDomain: SuperTokensConfig.appInfo.apiDomain,
+    websiteDomain: SuperTokensConfig.appInfo.websiteDomain,
+  });
+  supertokens.init(SuperTokensConfig);
+
   const mikroOrmConfig = {
     ...(await import(
       `./mikro-orm.${process.env.MIKRO_ORM_DRIVER || 'sqlite'}${isTypescript ? '.ts' : '.js'}`
@@ -113,8 +123,20 @@ const initializeApp = async () => {
   const app = express();
   app.use(express.json({limit: '50mb'}));
   app.use(express.urlencoded({limit: '50mb', extended: true}));
-  app.use(cors());
-  app.use(express.json());
+  app.use(
+    cors({
+      origin: [getWebsiteDomain()],
+      allowedHeaders: [
+        'content-type',
+        ...supertokens.getAllCORSHeaders(),
+        'seed-group',
+      ],
+      methods: ['GET', 'PUT', 'POST', 'DELETE'],
+      credentials: true,
+    })
+  );
+  app.use(authMiddleware.init);
+  app.use('/api', authMiddleware.verify);
   app.use((_, __, next) => RequestContext.create(DI.orm.em, next));
   app.use('/api', seedsRoutes);
   app.use('/api', graphsRoutes);
@@ -122,6 +144,7 @@ const initializeApp = async () => {
   app.use('/api', graphqlRoutes);
   app.use('/api', seedGroupsRoutes);
   app.use('/api', apolloApiKeysRoutes);
+  app.use('/api', avatarRoutes);
 
   const isConnected = await DI.orm.isConnected();
   app.get('/health', (_, res) => {
@@ -162,6 +185,8 @@ const initializeApp = async () => {
   app.get('*', (_, res) => {
     res.sendFile(path.join(__dirname, '../../frontend/build', 'index.html'));
   });
+
+  app.use(authMiddleware.error);
 
   app.listen(port, () => {
     logger.startup('Server running', {port, url: `http://localhost:${port}`});
